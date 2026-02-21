@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Architect - النسخة الشاملة</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Nunito', sans-serif; background-color: #f0f2f5; }
+        canvas { display: block; }
+    </style>
+
+    <!-- Import Map for ESM Modules -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom": "https://esm.sh/react-dom@18.2.0",
+        "three": "https://esm.sh/three@0.160.0",
+        "three/examples/jsm/controls/OrbitControls": "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls"
+      }
+    }
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import ReactDOM from 'react-dom';
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+
+        // --- 1. Constants & Data ---
+        const COLORS = { WOOD: 0x8B4513, GREEN: 0x228B22, DARK: 0x333333, WHITE: 0xFFFFFF, GOLD: 0xFFD700 };
+        
+        const generateEagle = () => {
+            const voxels = [];
+            // Simple Branch
+            for(let x=-5; x<5; x++) voxels.push({x, y:0, z:0, color: COLORS.WOOD});
+            // Simple Body
+            for(let y=1; y<5; y++) voxels.push({x:0, y, z:0, color: COLORS.DARK});
+            // Head
+            voxels.push({x:0, y:5, z:0, color: COLORS.WHITE});
+            voxels.push({x:1, y:5, z:0, color: COLORS.GOLD}); // Beak
+            return voxels;
+        };
+
+        // --- 2. Voxel Engine ---
+        class VoxelEngine {
+            constructor(container, onCountChange) {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0xf0f2f5);
+                this.camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.set(20, 20, 40);
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                container.appendChild(this.renderer.domElement);
+                
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.autoRotate = true;
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+                this.scene.add(ambientLight);
+                const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+                dirLight.position.set(10, 20, 10);
+                this.scene.add(dirLight);
+
+                this.voxels = [];
+                this.mesh = null;
+                this.animate();
+            }
+
+            loadModel(data) {
+                if (this.mesh) this.scene.remove(this.mesh);
+                
+                const geometry = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+                const material = new THREE.MeshStandardMaterial();
+                this.mesh = new THREE.InstancedMesh(geometry, material, data.length);
+                
+                const dummy = new THREE.Object3D();
+                data.forEach((v, i) => {
+                    dummy.position.set(v.x, v.y, v.z);
+                    dummy.updateMatrix();
+                    this.mesh.setMatrixAt(i, dummy.matrix);
+                    this.mesh.setColorAt(i, new THREE.Color(v.color));
+                });
+                
+                this.scene.add(this.mesh);
+                this.voxels = data.map(v => ({...v, vy: 0}));
+            }
+
+            dismantle() {
+                this.isDismantling = true;
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                if (this.isDismantling && this.mesh) {
+                    const dummy = new THREE.Object3D();
+                    this.voxels.forEach((v, i) => {
+                        v.vy -= 0.02; // Gravity
+                        v.y += v.vy;
+                        if (v.y < -5) { v.y = -5; v.vy *= -0.5; }
+                        dummy.position.set(v.x, v.y, v.z);
+                        dummy.updateMatrix();
+                        this.mesh.setMatrixAt(i, dummy.matrix);
+                    });
+                    this.mesh.instanceMatrix.needsUpdate = true;
+                }
+                this.controls.update();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // --- 3. React App ---
+        const App = () => {
+            const containerRef = useRef(null);
+            const engineRef = useRef(null);
+            const [count, setCount] = useState(0);
+
+            useEffect(() => {
+                engineRef.current = new VoxelEngine(containerRef.current);
+                const model = generateEagle();
+                engineRef.current.loadModel(model);
+                setCount(model.length);
+            }, []);
+
+            return React.createElement('div', { className: 'relative w-full h-screen' },
+                React.createElement('div', { ref: containerRef, className: 'w-full h-full' }),
+                // UI Overlay
+                React.createElement('div', { className: 'absolute top-0 left-0 w-full p-6 pointer-events-none flex justify-between' },
+                    React.createElement('div', { className: 'bg-white/90 p-4 rounded-2xl shadow-xl pointer-events-auto' },
+                        React.createElement('h1', { className: 'text-xl font-black text-slate-800' }, 'Voxel Architect'),
+                        React.createElement('p', { className: 'text-slate-500 font-bold' }, `عدد المكعبات: ${count}`)
+                    ),
+                    React.createElement('button', {
+                        onClick: () => engineRef.current.dismantle(),
+                        className: 'bg-red-500 hover:bg-red-600 text-white px-8 py-4 rounded-2xl shadow-lg font-black pointer-events-auto transition-transform active:scale-95'
+                    }, 'تحطيم النموذج!')
+                )
+            );
+        };
+
+        ReactDOM.render(React.createElement(App), document.getElementById('root'));
+    </script>
+</body>
+</html>
